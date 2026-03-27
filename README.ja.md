@@ -1,7 +1,7 @@
 # ai-agent-blueprint
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
-[![Stars](https://img.shields.io/github/stars/your-username/ai-agent-blueprint?style=social)](https://github.com/your-username/ai-agent-blueprint)
+[![Stars](https://img.shields.io/github/stars/sentinel-dev2026/ai-agent-blueprint?style=social)](https://github.com/sentinel-dev2026/ai-agent-blueprint)
 
 **Claude Codeで自律型AIエージェントを構築するためのブループリント**
 
@@ -57,7 +57,7 @@ ai-agent-blueprintは、Claude Codeを活用して自律的に動作するAIエ�
 
 ```bash
 # 1. リポジトリをクローン
-git clone https://github.com/your-username/ai-agent-blueprint.git
+git clone https://github.com/sentinel-dev2026/ai-agent-blueprint.git
 cd ai-agent-blueprint
 
 # 2. SOUL.mdを編集 — エージェントの役割・性格を定義
@@ -157,7 +157,7 @@ ai-agent-blueprint/
 
 ## Author
 
-**Junya** — [TBD]
+**Junya** — [GitHub](https://github.com/sentinel-dev2026) / [X (@sentinel_dev93)](https://x.com/sentinel_dev93)
 
 ---
 

@@ -1,7 +1,7 @@
 # ai-agent-blueprint
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
-[![GitHub stars](https://img.shields.io/github/stars/your-username/ai-agent-blueprint.svg?style=social)](https://github.com/your-username/ai-agent-blueprint/stargazers)
+[![GitHub stars](https://img.shields.io/github/stars/sentinel-dev2026/ai-agent-blueprint.svg?style=social)](https://github.com/sentinel-dev2026/ai-agent-blueprint/stargazers)
 
 **A blueprint for building autonomous AI agents with Claude Code.**
 
@@ -61,7 +61,7 @@ Most AI agent setups are one-shot: you prompt, you get a response, context is lo
 
 ```bash
 # 1. Clone the repository
-git clone https://github.com/your-username/ai-agent-blueprint.git
+git clone https://github.com/sentinel-dev2026/ai-agent-blueprint.git
 cd ai-agent-blueprint
 
 # 2. Define your agent's identity
@@ -167,8 +167,8 @@ This project is licensed under the [MIT License](LICENSE).
 
 **Junya**
 
-- GitHub: *[TBD]*
-- X (Twitter): *[TBD]*
+- GitHub: [sentinel-dev2026](https://github.com/sentinel-dev2026)
+- X (Twitter): [@sentinel_dev93](https://x.com/sentinel_dev93)
 
 ---
 
