@@ -83,6 +83,18 @@ cat MEMORY.md
 
 ---
 
+## See It in Action
+
+Want to know what this blueprint actually does in practice? Check out the examples:
+
+| Example | Description |
+|---------|-------------|
+| [**Before & After**](examples/before_after.md) | Side-by-side comparison of empty templates vs. after one day of operation. See how MEMORY.md and TASKS.md evolve as the agent learns. |
+| [**Sample Session**](examples/sample_session.md) | A complete walkthrough of a research request — from user input to parallel sub-agent execution to automatic PDCA retrospective. |
+| [**Sample Output**](examples/sample_output.md) | An example research report generated entirely by sub-agents. This is the quality of output you get out of the box. |
+
+---
+
 ## Directory Structure
 
 ```
@@ -91,6 +103,7 @@ ai-agent-blueprint/
 ├── SOUL.md            # Agent identity, role definition, PDCA rules
 ├── MEMORY.md          # Persistent memory index (auto-maintained)
 ├── TASKS.md           # Task queue and progress tracking
+├── examples/          # Usage examples (before/after, sample session, sample output)
 ├── memory/            # Individual memory files (auto-generated)
 │   ├── user_*.md      # User profile and preferences
 │   ├── feedback_*.md  # Behavioral corrections and confirmations

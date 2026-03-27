@@ -77,6 +77,16 @@ cat MEMORY.md
 
 > **前提条件:** Claude Code CLIがインストール済みであること。 `npm install -g @anthropic-ai/claude-code` でインストールできます。
 
+## 実例を見る
+
+テンプレートを使うとどうなるのか？具体的な実例を用意しました。
+
+| 実例 | 内容 |
+|------|------|
+| [**Before & After**](examples/before_after.md) | テンプレート初期状態と1日運用後の比較。MEMORY.mdとTASKS.mdがどう進化するかを一目で確認できます。 |
+| [**Sample Session**](examples/sample_session.md) | リサーチ依頼の実際の流れ。ユーザーの一言から並列実行、PDCA振り返りまでの全プロセスを対話形式で紹介。 |
+| [**Sample Output**](examples/sample_output.md) | サブエージェントが自動生成したリサーチレポートのサンプル。この品質がそのまま出てきます。 |
+
 ## ディレクトリ構造
 
 ```
@@ -85,6 +95,7 @@ ai-agent-blueprint/
 ├── SOUL.md            # エージェントのアイデンティティ・行動原則
 ├── MEMORY.md          # 永続記憶（自動更新される）
 ├── TASKS.md           # タスクキュー（自動更新される）
+├── examples/          # 使用例（Before/After、セッション例、出力サンプル）
 ├── skills/            # 再利用可能なスキルテンプレート
 │   ├── research.md    #   リサーチスキル定義
 │   ├── coding.md      #   コーディングスキル定義
