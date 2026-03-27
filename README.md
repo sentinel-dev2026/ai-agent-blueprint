@@ -165,8 +165,8 @@ This architecture has been validated in daily production use:
 
 ## Related Links
 
-- Detailed setup guide — *[coming soon]*
-- Introductory article (Qiita) — *[coming soon]*
+- [Complete Guide: Building an Autonomous AI Agent with Claude Code (note, Japanese)](https://note.com/sentinel_dev)
+- [Building an Autonomous AI Agent with Claude Code (Qiita, Japanese)](https://qiita.com/sentinel_dev)
 
 ---
 

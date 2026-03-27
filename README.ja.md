@@ -159,8 +159,8 @@ ai-agent-blueprint/
 
 ## 関連リンク
 
-- [noteで詳細ガイドを公開予定][TBD]
-- [Qiitaで入門記事を公開予定][TBD]
+- [【完全ガイド】Claude Codeで自律型AIエージェントを構築する（note）](https://note.com/sentinel_dev)
+- [Claude Codeで自律型AIエージェントを作ってみた（Qiita）](https://qiita.com/sentinel_dev)
 
 ## ライセンス
 
