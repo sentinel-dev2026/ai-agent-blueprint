@@ -1,0 +1,13 @@
+{
+  "name": "sentinel-agent",
+  "version": "1.0.0",
+  "main": "sentinel.js",
+  "scripts": {
+    "start": "node sentinel.js"
+  },
+  "dependencies": {
+    "marked": "^17.0.5",
+    "neo-blessed": "^0.2.0",
+    "playwright": "^1.58.2"
+  }
+}

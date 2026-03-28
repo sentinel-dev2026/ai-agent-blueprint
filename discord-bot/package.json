@@ -1,0 +1,14 @@
+{
+  "name": "sentinel-discord-bot",
+  "version": "1.0.0",
+  "description": "Sentinel Discord Bot - スマホからSentinelに指示を飛ばす",
+  "type": "module",
+  "scripts": {
+    "start": "node bot.js",
+    "notify": "node notify.js"
+  },
+  "dependencies": {
+    "discord.js": "^14.25.0",
+    "dotenv": "^16.4.0"
+  }
+}

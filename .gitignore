@@ -1,31 +1,58 @@
-# Runtime directories (contain generated/personal content)
-logs/
-content/
-strategy/
-
-# Log files
-*.log
-
-# Environment variables (may contain secrets)
+# 環境変数・認証情報
 .env
 .env.local
 .env.*.local
+.note-cookies.json
+tokens.json
+*.key
+*.pem
+
+# セッション・一時ファイル
+.brain_session_id
+.tmp_prompt
+
+# ログ
+logs/
+*.log
+
+# 会話履歴・個人情報
+conversation_history.jsonl
+conversation_summary.md
+MEMORY.md
+TASKS.md
+
+# コンテンツ（記事ドラフト等）
+content/
+
+# ジョブ出力・inbox
+jobs/
+inbox/
+
+# 戦略・リサーチ（個人情報を含む可能性）
+strategy/
 
 # Node.js
 node_modules/
+package-lock.json
 
-# OS files
+# PM2
+.pm2/
+
+# OS
 .DS_Store
 Thumbs.db
 
-# Editor files
+# Editor
 *.swp
 *.swo
 *~
 .vscode/
 .idea/
 
-# Temporary files
+# Temporary
 tmp/
 temp/
 *.tmp
+
+# Claude
+.claude/
