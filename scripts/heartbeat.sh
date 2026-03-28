@@ -2,7 +2,8 @@
 # heartbeat.sh — 30分ごとにcronから呼ばれる定期巡回スクリプト
 # 状態を確認し、提案をinboxに書いて終了する
 
-AGENT_DIR="$HOME/agent"
+# スクリプトの場所からエージェントディレクトリを自動決定
+AGENT_DIR="$(cd "$(dirname "$0")/.." && pwd)"
 INBOX_DIR="$AGENT_DIR/inbox"
 CONFIG_DIR="$AGENT_DIR/config"
 

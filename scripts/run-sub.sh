@@ -123,7 +123,7 @@ run_agent() {
 
   for i in $(seq 1 $MAX_RETRIES); do
     echo "[run-sub.sh] 試行 $i/$MAX_RETRIES..." >&2
-    OUTPUT=$(echo "$PROMPT" | claude -p --dangerously-skip-permissions 2>&1)
+    OUTPUT=$(echo "$PROMPT" | claude -p --dangerously-skip-permissions --no-session-persistence 2>&1)
     EXIT_CODE=$?
     echo "[run-sub.sh] claude 終了コード: $EXIT_CODE, 出力長: ${#OUTPUT}文字" >&2
 

@@ -22,7 +22,7 @@ try {
 } catch (e) {}
 
 const HOME = process.env.HOME || process.env.USERPROFILE;
-const AGENT_DIR = path.join(HOME, 'agent');
+const AGENT_DIR = __dirname;
 const JOBS_DIR = path.join(AGENT_DIR, 'jobs');
 const SCRIPTS_DIR = path.join(AGENT_DIR, 'scripts');
 
@@ -37,6 +37,27 @@ let brainProc = null;             // 常駐CLIプロセス
 const pendingEvents = [];         // Brain処理待ちイベントキュー
 let brainSessionId = null;        // Brainのセッション維持用
 const SESSION_FILE = path.join(AGENT_DIR, '.brain_session_id');
+
+// プロジェクト管理
+let currentProject = null;        // 現在のプロジェクト名（nullはデフォルト）
+const PROJECTS_DIR = path.join(AGENT_DIR, 'projects');
+
+function getProjectDir() {
+  if (!currentProject) return AGENT_DIR;
+  return path.join(PROJECTS_DIR, currentProject);
+}
+
+function getProjectFile(filename) {
+  const projDir = getProjectDir();
+  const projFile = path.join(projDir, filename);
+  // プロジェクト固有ファイルがあればそれを、なければルートを返す
+  if (currentProject && fs.existsSync(projFile)) return projFile;
+  if (currentProject && !fs.existsSync(projFile)) {
+    // 初回はルートからコピーしない（空で始める）
+    return projFile;
+  }
+  return path.join(AGENT_DIR, filename);
+}
 
 // ============================================================
 // 常駐CLIプロセス管理 (v2方式)
@@ -197,16 +218,16 @@ const USAGE_LOG_FILE = path.join(AGENT_DIR, 'logs', 'token_usage.jsonl');
 // ============================================================
 // 会話履歴の永続化（2層: サマリー + 直近生ログ）
 // ============================================================
-const HISTORY_FILE = path.join(AGENT_DIR, 'conversation_history.jsonl');
-const HISTORY_ARCHIVE_DIR = path.join(AGENT_DIR, 'logs', 'conversation_archive');
-const SUMMARY_FILE = path.join(AGENT_DIR, 'conversation_summary.md');
+function getHistoryFile() { return path.join(getProjectDir(), 'conversation_history.jsonl'); }
+function getArchiveDir() { return path.join(getProjectDir(), 'logs', 'conversation_archive'); }
+function getSummaryFile() { return path.join(getProjectDir(), 'conversation_summary.md'); }
 const MAX_RECENT = 60;            // 直近の生ログ保持件数
 
 // 起動時にファイルから読み込み
 function loadHistory() {
   try {
-    if (!fs.existsSync(HISTORY_FILE)) return [];
-    const lines = fs.readFileSync(HISTORY_FILE, 'utf8').trim().split('\n').filter(Boolean);
+    if (!fs.existsSync(getHistoryFile())) return [];
+    const lines = fs.readFileSync(getHistoryFile(), 'utf8').trim().split('\n').filter(Boolean);
     return lines.map(line => JSON.parse(line));
   } catch (e) {
     return [];
@@ -215,8 +236,8 @@ function loadHistory() {
 
 function loadSummary() {
   try {
-    if (!fs.existsSync(SUMMARY_FILE)) return '';
-    return fs.readFileSync(SUMMARY_FILE, 'utf8');
+    if (!fs.existsSync(getSummaryFile())) return '';
+    return fs.readFileSync(getSummaryFile(), 'utf8');
   } catch (e) {
     return '';
   }
@@ -226,7 +247,7 @@ function loadSummary() {
 function appendHistory(entry) {
   const record = { ...entry, timestamp: new Date().toISOString() };
   conversationLog.push(record);
-  fs.appendFileSync(HISTORY_FILE, JSON.stringify(record) + '\n', 'utf8');
+  fs.appendFileSync(getHistoryFile(), JSON.stringify(record) + '\n', 'utf8');
 
   // 直近件数を超えたら古い分を要約（非同期、エラーでも止めない）
   if (conversationLog.length > MAX_RECENT) {
@@ -280,12 +301,12 @@ ${textToCompress}
 
   if (result) {
     // サマリーを保存
-    fs.writeFileSync(SUMMARY_FILE, result, 'utf8');
+    fs.writeFileSync(getSummaryFile(), result, 'utf8');
 
     // 古い履歴をアーカイブに保存
-    fs.mkdirSync(HISTORY_ARCHIVE_DIR, { recursive: true });
+    fs.mkdirSync(getArchiveDir(), { recursive: true });
     const archiveName = `archive_${new Date().toISOString().replace(/[:.]/g, '-')}.jsonl`;
-    const archivePath = path.join(HISTORY_ARCHIVE_DIR, archiveName);
+    const archivePath = path.join(getArchiveDir(), archiveName);
     const archiveLines = toSummarize.map(r => JSON.stringify(r)).join('\n') + '\n';
     fs.writeFileSync(archivePath, archiveLines, 'utf8');
 
@@ -294,7 +315,7 @@ ${textToCompress}
     conversationLog.length = 0;
     recent.forEach(r => conversationLog.push(r));
     const newLines = recent.map(r => JSON.stringify(r)).join('\n') + '\n';
-    fs.writeFileSync(HISTORY_FILE, newLines, 'utf8');
+    fs.writeFileSync(getHistoryFile(), newLines, 'utf8');
 
     printSystem(`会話履歴を圧縮完了（${toSummarize.length}件 → サマリー化、アーカイブ: ${archiveName}）`);
   } else {
@@ -329,7 +350,7 @@ try {
 // ============================================================
 // Web UI
 // ============================================================
-const WEB_PORT = 3100;
+const WEB_PORT = parseInt(process.env.WEB_PORT || '3100', 10);
 const sseClients = new Set();  // Server-Sent Events 接続中のクライアント
 const pendingCallbacks = [];   // Discord等からのコールバックURL待ち行列
 
@@ -344,6 +365,27 @@ function sendToUI(type, data) {
 function printSentinel(msg) {
   sendToUI('sentinel', { content: msg });
   console.log(`[Sentinel] ${msg.slice(0, 100)}...`);
+}
+
+// pendingCallbacksがあればDiscord Webhookで返信
+function replyToCallback(msg) {
+  if (pendingCallbacks.length === 0) return;
+  const cb = pendingCallbacks.shift();
+  try {
+    const chunks = [];
+    for (let i = 0; i < msg.length; i += 1900) {
+      chunks.push(msg.substring(i, i + 1900));
+    }
+    for (const chunk of chunks) {
+      fetch(cb.url, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ content: chunk })
+      }).catch(e => console.error('[Callback Error]', e.message));
+    }
+  } catch (e) {
+    console.error('[Callback Error]', e.message);
+  }
 }
 
 function printSystem(msg) {
@@ -383,8 +425,18 @@ function updateStatus() {
 
 // 入力処理
 function handleInput(text) {
-  const trimmed = text.trim();
+  let trimmed = text.trim();
   if (!trimmed) return;
+
+  // Discordプレフィックスを除去してコマンド検出
+  const discordMatch = trimmed.match(/^【.*?】\s*([\s\S]*)$/);
+  if (discordMatch) {
+    const inner = discordMatch[1].trim();
+    // /で始まるコマンドならプレフィックスを外す
+    if (inner.startsWith('/')) {
+      trimmed = inner;
+    }
+  }
 
   if (trimmed === '/jobs') {
     const list = [];
@@ -393,6 +445,46 @@ function handleInput(text) {
     if (brainBusy) list.push('Brain: 思考中');
     if (list.length === 0) list.push('(何も実行していません)');
     sendToUI('info', { content: list.join('\n') });
+    return;
+  }
+
+  if (trimmed.startsWith('/project')) {
+    const projName = trimmed.replace('/project', '').trim();
+    if (!projName) {
+      let dirs = [];
+      try {
+        dirs = fs.readdirSync(PROJECTS_DIR).filter(d =>
+          fs.statSync(path.join(PROJECTS_DIR, d)).isDirectory()
+        );
+      } catch (e) {}
+      const msg = `現在のプロジェクト: ${currentProject || '(デフォルト)'}\nプロジェクト一覧: ${dirs.length > 0 ? dirs.join(', ') : '(なし)'}`;
+      printSentinel(msg);
+      replyToCallback(msg);
+      return;
+    }
+
+    // プロジェクト切り替え
+    const projDir = path.join(PROJECTS_DIR, projName);
+    fs.mkdirSync(path.join(projDir, 'logs'), { recursive: true });
+
+    currentProject = projName;
+
+    // 会話ログをプロジェクトから読み直し
+    conversationLog.length = 0;
+    loadHistory().forEach(r => conversationLog.push(r));
+
+    // CLIプロセスを再起動してコンテキストを完全リセット
+    brainSessionId = null;
+    brainReady = false;
+    if (brainProc) {
+      brainProc.kill();
+      brainProc = null;
+    }
+    const switchMsg = `プロジェクト切り替え: ${projName}（CLI再起動中...）`;
+    printSentinel(switchMsg);
+    replyToCallback(switchMsg);
+    startBrainProcess();
+    queueEvent({ type: 'boot' });
     return;
   }
 
@@ -580,7 +672,7 @@ function getHTML() {
     <textarea id="input" rows="1" placeholder="メッセージを入力... (Ctrl+Enter で送信)"></textarea>
     <button id="send">送信</button>
   </div>
-  <div id="commands">/jobs /session /newsession</div>
+  <div id="commands">/jobs /session /newsession /project &lt;名前&gt;</div>
 
 <script>
 const chat = document.getElementById('chat');
@@ -715,8 +807,11 @@ function buildBootPrompt() {
   let soul, memory, tasks;
   try {
     soul = fs.readFileSync(path.join(AGENT_DIR, 'SOUL.md'), 'utf8');
-    memory = fs.readFileSync(path.join(AGENT_DIR, 'MEMORY.md'), 'utf8');
-    tasks = fs.readFileSync(path.join(AGENT_DIR, 'TASKS.md'), 'utf8');
+    // プロジェクト固有のMEMORY/TASKSを読む。なければルートを使う
+    const memFile = getProjectFile('MEMORY.md');
+    const taskFile = getProjectFile('TASKS.md');
+    memory = fs.existsSync(memFile) ? fs.readFileSync(memFile, 'utf8') : '(なし)';
+    tasks = fs.existsSync(taskFile) ? fs.readFileSync(taskFile, 'utf8') : '(なし)';
   } catch (e) {
     return null;
   }
@@ -741,7 +836,7 @@ ${convoContext}
 ${RESPONSE_FORMAT}
 
 ---
-【起動】初回起動。状態を確認して挨拶せよ。`;
+【起動】初回起動。${currentProject ? `プロジェクト「${currentProject}」のコンテキストで動作中。` : ''}状態を確認して挨拶せよ。`;
 }
 
 function buildEventPrompt(event) {
@@ -882,10 +977,10 @@ function executeActions(actions, origin) {
   if (actions.write_files && Array.isArray(actions.write_files)) {
     for (const file of actions.write_files) {
       try {
-        const filePath = expandHome(file.path);
+        const filePath = resolveFilePath(file.path);
         fs.mkdirSync(path.dirname(filePath), { recursive: true });
         fs.writeFileSync(filePath, file.content, 'utf8');
-        printSystem(`ファイル更新: ${file.path}`);
+        printSystem(`ファイル更新: ${file.path}${currentProject ? ` (project: ${currentProject})` : ''}`);
       } catch (e) {
         printSystem(`ファイル書き込みエラー: ${e.message}`);
       }
@@ -896,10 +991,10 @@ function executeActions(actions, origin) {
   if (actions.append_files && Array.isArray(actions.append_files)) {
     for (const file of actions.append_files) {
       try {
-        const filePath = expandHome(file.path);
+        const filePath = resolveFilePath(file.path);
         fs.mkdirSync(path.dirname(filePath), { recursive: true });
         fs.appendFileSync(filePath, file.content, 'utf8');
-        printSystem(`ファイル追記: ${file.path}`);
+        printSystem(`ファイル追記: ${file.path}${currentProject ? ` (project: ${currentProject})` : ''}`);
       } catch (e) {
         printSystem(`ファイル追記エラー: ${e.message}`);
       }
@@ -909,6 +1004,20 @@ function executeActions(actions, origin) {
 
 function expandHome(p) {
   return p.replace(/^~[\\/]/, HOME + '/');
+}
+
+// MEMORY.md/TASKS.mdはプロジェクトディレクトリに解決する
+function resolveFilePath(filePath) {
+  const expanded = expandHome(filePath);
+  if (currentProject) {
+    const basename = path.basename(expanded);
+    if (basename === 'MEMORY.md' || basename === 'TASKS.md') {
+      const projDir = getProjectDir();
+      fs.mkdirSync(projDir, { recursive: true });
+      return path.join(projDir, basename);
+    }
+  }
+  return expanded;
 }
 
 // ============================================================

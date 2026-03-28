@@ -3,9 +3,9 @@
 このファイルはcron実行(run.sh)用。対話モードはsentinel.jsを使うこと。
 
 必ず最初に以下を実行すること：
-1. `~/agent/SOUL.md` を読む
-2. `~/agent/MEMORY.md` を読む
-3. `~/agent/TASKS.md` を読む
+1. 同じディレクトリの `SOUL.md` を読む
+2. 同じディレクトリの `MEMORY.md` を読む
+3. 同じディレクトリの `TASKS.md` を読む
 
 ## 絶対ルール
 - タスク完了後は必ずMEMORY.mdとTASKS.mdを更新する
