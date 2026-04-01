@@ -1,25 +1,27 @@
 #!/bin/bash
 # ============================================================
-# Sentinel Agent セットアップスクリプト
-# 複数エージェント対応。対話形式で設定を行う。
+# Sentinel Agent セットアップスクリプト（ローカル版）
+# 現在のディレクトリをソースとして新しいエージェントをセットアップ
 # ============================================================
 
 set -e
 
 echo "========================================"
-echo "  Sentinel Agent セットアップ"
+echo "  Sentinel Agent セットアップ（ローカル）"
 echo "========================================"
 echo ""
 
+SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+
 # ---- エージェント名・ディレクトリ ----
-read -p "エージェント名（例: sentinel-a）: " AGENT_NAME
+read -p "エージェント名（例: sentinel-b）: " AGENT_NAME
 AGENT_NAME=${AGENT_NAME:-sentinel}
 
 DEFAULT_DIR="$HOME/$AGENT_NAME"
 read -p "インストール先 [$DEFAULT_DIR]: " AGENT_DIR
 AGENT_DIR=${AGENT_DIR:-$DEFAULT_DIR}
 
-if [ -d "$AGENT_DIR/sentinel.js" ] || [ -f "$AGENT_DIR/sentinel.js" ]; then
+if [ -f "$AGENT_DIR/sentinel.js" ]; then
   echo "⚠️  $AGENT_DIR には既にsentinel.jsが存在します。上書きしますか？"
   read -p "(y/N): " OVERWRITE
   if [ "$OVERWRITE" != "y" ] && [ "$OVERWRITE" != "Y" ]; then
@@ -29,15 +31,15 @@ if [ -d "$AGENT_DIR/sentinel.js" ] || [ -f "$AGENT_DIR/sentinel.js" ]; then
 fi
 
 # ---- ポート番号 ----
-read -p "Web UIポート番号 [3100]: " WEB_PORT
-WEB_PORT=${WEB_PORT:-3100}
+read -p "Web UIポート番号 [3200]: " WEB_PORT
+WEB_PORT=${WEB_PORT:-3200}
 
 # ---- Discord設定 ----
 echo ""
 echo "--- Discord設定 ---"
-read -p "Discord Botトークン: " DISCORD_TOKEN
+read -p "Discord Botトークン（既存botを共有する場合は空欄）: " DISCORD_TOKEN
 read -p "メインチャンネルID: " MAIN_CHANNEL_ID
-read -p "Heartbeatチャンネル ID（空欄でスキップ）: " HEARTBEAT_CHANNEL_ID
+read -p "HeartbeatチャンネルID（空欄でスキップ）: " HEARTBEAT_CHANNEL_ID
 read -p "メインチャンネルのWebhook URL: " WEBHOOK_MAIN
 read -p "HeartbeatチャンネルのWebhook URL（空欄でスキップ）: " WEBHOOK_HEARTBEAT
 read -p "許可するユーザーID（カンマ区切り、空欄で全員許可）: " ALLOWED_USER_IDS
@@ -68,8 +70,6 @@ fi
 echo ""
 echo "--- セットアップ開始 ---"
 
-SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
-
 mkdir -p "$AGENT_DIR"
 mkdir -p "$AGENT_DIR/config"
 mkdir -p "$AGENT_DIR/scripts"
@@ -78,15 +78,14 @@ mkdir -p "$AGENT_DIR/logs"
 mkdir -p "$AGENT_DIR/jobs"
 mkdir -p "$AGENT_DIR/inbox"
 mkdir -p "$AGENT_DIR/content/drafts"
-mkdir -p "$AGENT_DIR/discord-bot"
 
 # コアファイル
 cp "$SCRIPT_DIR/sentinel.js" "$AGENT_DIR/"
 cp "$SCRIPT_DIR/SOUL.md" "$AGENT_DIR/"
 cp "$SCRIPT_DIR/CLAUDE.md" "$AGENT_DIR/"
 cp "$SCRIPT_DIR/package.json" "$AGENT_DIR/"
-cp "$SCRIPT_DIR/run.sh" "$AGENT_DIR/"
-cp "$SCRIPT_DIR/chat.sh" "$AGENT_DIR/"
+[ -f "$SCRIPT_DIR/run.sh" ] && cp "$SCRIPT_DIR/run.sh" "$AGENT_DIR/"
+[ -f "$SCRIPT_DIR/chat.sh" ] && cp "$SCRIPT_DIR/chat.sh" "$AGENT_DIR/"
 [ -f "$SCRIPT_DIR/chat.bat" ] && cp "$SCRIPT_DIR/chat.bat" "$AGENT_DIR/"
 
 # Config
@@ -97,40 +96,55 @@ cp "$SCRIPT_DIR/config/intent_patterns.json" "$AGENT_DIR/config/"
 cp "$SCRIPT_DIR/scripts/heartbeat.sh" "$AGENT_DIR/scripts/"
 cp "$SCRIPT_DIR/scripts/run-sub.sh" "$AGENT_DIR/scripts/"
 chmod +x "$AGENT_DIR/scripts/"*.sh
-chmod +x "$AGENT_DIR/run.sh" "$AGENT_DIR/chat.sh"
+[ -f "$AGENT_DIR/run.sh" ] && chmod +x "$AGENT_DIR/run.sh"
+[ -f "$AGENT_DIR/chat.sh" ] && chmod +x "$AGENT_DIR/chat.sh"
 
 # Skills
 cp "$SCRIPT_DIR/skills/"*.md "$AGENT_DIR/skills/"
 
 # Docs
 mkdir -p "$AGENT_DIR/docs"
-cp "$SCRIPT_DIR/docs/architecture.md" "$AGENT_DIR/docs/"
+[ -f "$SCRIPT_DIR/docs/architecture.md" ] && cp "$SCRIPT_DIR/docs/architecture.md" "$AGENT_DIR/docs/"
 
-# MEMORY.md / TASKS.md テンプレート
-cp "$SCRIPT_DIR/MEMORY.md.example" "$AGENT_DIR/MEMORY.md"
-cp "$SCRIPT_DIR/TASKS.md.example" "$AGENT_DIR/TASKS.md"
+# MEMORY.md / TASKS.md
+if [ -f "$SCRIPT_DIR/MEMORY.md.example" ]; then
+  cp "$SCRIPT_DIR/MEMORY.md.example" "$AGENT_DIR/MEMORY.md"
+elif [ ! -f "$AGENT_DIR/MEMORY.md" ]; then
+  cp "$SCRIPT_DIR/MEMORY.md" "$AGENT_DIR/MEMORY.md" 2>/dev/null || echo "# MEMORY" > "$AGENT_DIR/MEMORY.md"
+fi
+
+if [ -f "$SCRIPT_DIR/TASKS.md.example" ]; then
+  cp "$SCRIPT_DIR/TASKS.md.example" "$AGENT_DIR/TASKS.md"
+elif [ ! -f "$AGENT_DIR/TASKS.md" ]; then
+  cp "$SCRIPT_DIR/TASKS.md" "$AGENT_DIR/TASKS.md" 2>/dev/null || echo "# TASKS" > "$AGENT_DIR/TASKS.md"
+fi
 
 # Discord bot
-cp "$SCRIPT_DIR/discord-bot/bot.js" "$AGENT_DIR/discord-bot/"
-cp "$SCRIPT_DIR/discord-bot/notify.js" "$AGENT_DIR/discord-bot/"
-cp "$SCRIPT_DIR/discord-bot/package.json" "$AGENT_DIR/discord-bot/"
-cp "$SCRIPT_DIR/discord-bot/.gitignore" "$AGENT_DIR/discord-bot/"
+if [ -n "$DISCORD_TOKEN" ]; then
+  mkdir -p "$AGENT_DIR/discord-bot"
+  cp "$SCRIPT_DIR/discord-bot/bot.js" "$AGENT_DIR/discord-bot/"
+  cp "$SCRIPT_DIR/discord-bot/notify.js" "$AGENT_DIR/discord-bot/"
+  cp "$SCRIPT_DIR/discord-bot/package.json" "$AGENT_DIR/discord-bot/"
+  [ -f "$SCRIPT_DIR/discord-bot/.gitignore" ] && cp "$SCRIPT_DIR/discord-bot/.gitignore" "$AGENT_DIR/discord-bot/"
+fi
 
-# X autoposter（オプション）
+# X autoposter
 if [ "$SETUP_X" = "y" ] || [ "$SETUP_X" = "Y" ]; then
   mkdir -p "$AGENT_DIR/x-autoposter"
   cp "$SCRIPT_DIR/x-autoposter/auth.js" "$AGENT_DIR/x-autoposter/"
   cp "$SCRIPT_DIR/x-autoposter/post.js" "$AGENT_DIR/x-autoposter/"
   cp "$SCRIPT_DIR/x-autoposter/scheduler.js" "$AGENT_DIR/x-autoposter/"
   cp "$SCRIPT_DIR/x-autoposter/package.json" "$AGENT_DIR/x-autoposter/"
-  cp "$SCRIPT_DIR/x-autoposter/.gitignore" "$AGENT_DIR/x-autoposter/"
+  [ -f "$SCRIPT_DIR/x-autoposter/.gitignore" ] && cp "$SCRIPT_DIR/x-autoposter/.gitignore" "$AGENT_DIR/x-autoposter/"
 fi
+
+# .gitignore
+[ -f "$SCRIPT_DIR/.gitignore" ] && cp "$SCRIPT_DIR/.gitignore" "$AGENT_DIR/"
 
 # ============================================================
 # .env ファイル生成
 # ============================================================
 
-# sentinel.js用
 cat > "$AGENT_DIR/.env" << ENVEOF
 WEB_PORT=${WEB_PORT}
 DISCORD_WEBHOOK_MAIN=${WEBHOOK_MAIN}
@@ -142,14 +156,17 @@ if [ -n "$QIITA_API_TOKEN" ]; then
 fi
 
 # Discord bot用
-cat > "$AGENT_DIR/discord-bot/.env" << ENVEOF
+if [ -n "$DISCORD_TOKEN" ]; then
+  cat > "$AGENT_DIR/discord-bot/.env" << ENVEOF
 DISCORD_TOKEN=${DISCORD_TOKEN}
 ALLOWED_USER_IDS=${ALLOWED_USER_IDS}
 SENTINEL_DIR=${AGENT_DIR}
+SENTINEL_API_URL=http://localhost:${WEB_PORT}
 DISCORD_WEBHOOK_URL=${WEBHOOK_MAIN}
 MAIN_CHANNEL_ID=${MAIN_CHANNEL_ID}
 HEARTBEAT_CHANNEL_ID=${HEARTBEAT_CHANNEL_ID}
 ENVEOF
+fi
 
 # X autoposter用
 if [ "$SETUP_X" = "y" ] || [ "$SETUP_X" = "Y" ]; then
@@ -170,7 +187,10 @@ echo ""
 echo "--- 依存パッケージのインストール ---"
 
 cd "$AGENT_DIR" && npm install 2>/dev/null || true
-cd "$AGENT_DIR/discord-bot" && npm install 2>/dev/null || true
+
+if [ -n "$DISCORD_TOKEN" ] && [ -d "$AGENT_DIR/discord-bot" ]; then
+  cd "$AGENT_DIR/discord-bot" && npm install 2>/dev/null || true
+fi
 
 if [ "$SETUP_X" = "y" ] || [ "$SETUP_X" = "Y" ]; then
   cd "$AGENT_DIR/x-autoposter" && npm install 2>/dev/null || true
@@ -193,9 +213,11 @@ echo ""
 echo "1. Sentinel起動:"
 echo "   cd $AGENT_DIR && node sentinel.js"
 echo ""
-echo "2. Discord bot起動:"
-echo "   cd $AGENT_DIR/discord-bot && node bot.js"
-echo ""
+if [ -n "$DISCORD_TOKEN" ]; then
+  echo "2. Discord bot起動:"
+  echo "   cd $AGENT_DIR/discord-bot && node bot.js"
+  echo ""
+fi
 echo "3. Heartbeat cron登録 (30分間隔):"
 echo "   pm2 start $AGENT_DIR/scripts/heartbeat.sh --name ${AGENT_NAME}-heartbeat --cron '*/30 * * * *' --no-autorestart --interpreter bash"
 echo ""

@@ -14,6 +14,9 @@ JOBS_DIR=~/agent/jobs
 INBOX_DIR=~/agent/inbox
 mkdir -p "$JOBS_DIR" "$INBOX_DIR"
 
+# --- PATH修正: claude CLIのパスを確実に含める ---
+export PATH="/c/Users/jtafu/.local/bin:$HOME/.local/bin:/usr/bin:/bin:/mingw64/bin:$PATH"
+
 # --- デバッグ用: 基本情報出力 ---
 echo "[run-sub.sh] 起動: $(date)" >&2
 echo "[run-sub.sh] 引数: $@" >&2

@@ -39,8 +39,18 @@ let brainSessionId = null;        // Brainのセッション維持用
 const SESSION_FILE = path.join(AGENT_DIR, '.brain_session_id');
 
 // プロジェクト管理
-let currentProject = null;        // 現在のプロジェクト名（nullはデフォルト）
 const PROJECTS_DIR = path.join(AGENT_DIR, 'projects');
+const CURRENT_PROJECT_FILE = path.join(AGENT_DIR, '.current_project');
+let currentProject = null;
+// 前回のプロジェクトを復元
+try {
+  if (fs.existsSync(CURRENT_PROJECT_FILE)) {
+    const saved = fs.readFileSync(CURRENT_PROJECT_FILE, 'utf8').trim();
+    if (saved && saved !== 'default' && fs.existsSync(path.join(PROJECTS_DIR, saved))) {
+      currentProject = saved;
+    }
+  }
+} catch (e) {}
 
 function getProjectDir() {
   if (!currentProject) return AGENT_DIR;
@@ -65,6 +75,7 @@ function getProjectFile(filename) {
 let brainReady = false;
 let brainResolve = null;          // 現在の応答待ちPromise resolver
 let brainChunks = [];             // 応答チャンク蓄積
+let brainKilledIntentionally = false;  // 意図的なkill（プロジェクト切り替え等）
 
 function startBrainProcess() {
   if (brainProc) return;
@@ -101,13 +112,18 @@ function startBrainProcess() {
   brainProc.on('close', (code) => {
     printSystem(`[v2] CLI プロセス終了 (code: ${code})`);
     brainReady = false;
-    brainProc = null;
     // 応答待ち中なら失敗で返す
     if (brainResolve) {
       brainResolve({ text: '[CLIプロセスが終了しました]', usage: {}, cost: 0 });
       brainResolve = null;
     }
-    // 自動再起動
+    // 意図的なkill（プロジェクト切り替え等）なら自動再起動しない
+    if (brainKilledIntentionally) {
+      brainKilledIntentionally = false;
+      return;
+    }
+    brainProc = null;
+    // 予期しないクラッシュ → 自動再起動
     setTimeout(() => {
       printSystem('[v2] 自動再起動...');
       startBrainProcess();
@@ -331,10 +347,15 @@ function buildConversationContext() {
   ).join('\n');
 
   let context = '';
-  if (summary) {
-    context += `【過去の会話サマリー】\n${summary}\n\n`;
+  if (summary || recent) {
+    context += `【会話履歴】\n以下はあなた（Sentinel）とJunyaの過去の会話記録である。これはあなた自身が行った会話であり、あなたはこの内容を完全に記憶している。「覚えていない」「引き継がれていない」等とは絶対に言うな。\n\n`;
+    if (summary) {
+      context += `--- 過去のサマリー ---\n${summary}\n\n`;
+    }
+    if (recent) {
+      context += `--- 直近の会話 ---\n${recent}`;
+    }
   }
-  context += `【直近の会話】\n${recent || '(なし)'}`;
   return context;
 }
 
@@ -449,7 +470,7 @@ function handleInput(text) {
   }
 
   if (trimmed.startsWith('/project')) {
-    const projName = trimmed.replace('/project', '').trim();
+    const projName = trimmed.replace('/project', '').trim().toLowerCase();
     if (!projName) {
       let dirs = [];
       try {
@@ -464,10 +485,15 @@ function handleInput(text) {
     }
 
     // プロジェクト切り替え
-    const projDir = path.join(PROJECTS_DIR, projName);
-    fs.mkdirSync(path.join(projDir, 'logs'), { recursive: true });
-
-    currentProject = projName;
+    if (projName === 'default') {
+      currentProject = null;
+      try { fs.unlinkSync(CURRENT_PROJECT_FILE); } catch (e) {}
+    } else {
+      const projDir = path.join(PROJECTS_DIR, projName);
+      fs.mkdirSync(path.join(projDir, 'logs'), { recursive: true });
+      currentProject = projName;
+      try { fs.writeFileSync(CURRENT_PROJECT_FILE, projName, 'utf8'); } catch (e) {}
+    }
 
     // 会話ログをプロジェクトから読み直し
     conversationLog.length = 0;
@@ -477,13 +503,22 @@ function handleInput(text) {
     brainSessionId = null;
     brainReady = false;
     if (brainProc) {
+      brainKilledIntentionally = true;
       brainProc.kill();
       brainProc = null;
     }
-    const switchMsg = `プロジェクト切り替え: ${projName}（CLI再起動中...）`;
+    const switchMsg = `プロジェクト切り替え: ${currentProject || 'デフォルト'}（CLI再起動中...）`;
     printSentinel(switchMsg);
     replyToCallback(switchMsg);
     startBrainProcess();
+    queueEvent({ type: 'boot' });
+    return;
+  }
+
+  if (trimmed === '/reload') {
+    const msg = 'SOUL.md/MEMORY.md/TASKS.mdを再読み込みします。';
+    printSentinel(msg);
+    replyToCallback(msg);
     queueEvent({ type: 'boot' });
     return;
   }
@@ -858,6 +893,17 @@ function buildEventPrompt(event) {
     case 'heartbeat':
       eventDesc = `【定期巡回レポート（Heartbeat）】\n以下はcronが自律的に生成した提案です。優先度を判断し、実行すべきものがあればACTIONSで実行せよ。Junyaへの報告も含めること。\n\n${event.content}`;
       break;
+    case 'context_refresh': {
+      // 静かなコンテキスト再注入（bootと違い応答不要）
+      const memFile = getProjectFile('MEMORY.md');
+      const taskFile = getProjectFile('TASKS.md');
+      const mem = fs.existsSync(memFile) ? fs.readFileSync(memFile, 'utf8') : '(なし)';
+      const tsk = fs.existsSync(taskFile) ? fs.readFileSync(taskFile, 'utf8') : '(なし)';
+      let soul = '';
+      try { soul = fs.readFileSync(path.join(AGENT_DIR, 'SOUL.md'), 'utf8'); } catch (e) {}
+      eventDesc = `【コンテキスト更新通知】\nファイルが更新されたため最新の状態を再注入する。応答は「了解」とだけ言え。長い報告は不要。\n\n---\n${soul}\n\n---\n${mem}\n\n---\n${tsk}`;
+      break;
+    }
     case 'boot':
       return buildBootPrompt();
   }
@@ -885,6 +931,12 @@ function callBrain(event) {
       resolve({ message: '[ファイル読み込みエラー]', actions: {} });
       return;
     }
+
+    // デバッグ: 送信プロンプトをログに記録
+    try {
+      fs.writeFileSync(path.join(AGENT_DIR, 'logs', 'brain_sent_last.log'),
+        `=== ${new Date().toISOString()} (${event.type}) ===\n${prompt}\n`);
+    } catch (e) {}
 
     // 常駐CLIが未起動なら起動
     if (!brainProc) {
@@ -934,7 +986,7 @@ function parseResponse(raw) {
   }
 
   // 宣言とアクション不一致の検出（パターンは config/intent_patterns.json から読み込み）
-  const hasEmptyActions = !actions.spawn && !actions.write_files && !actions.append_files;
+  const hasEmptyActions = !actions.spawn && !actions.write_files && !actions.append_files && !actions.send_files;
   let intentMismatch = false;
   if (hasEmptyActions && message) {
     let intentPatterns = [];
@@ -974,6 +1026,7 @@ function executeActions(actions, origin) {
   }
 
   // ファイル書き込み（上書き）
+  let needsReload = false;
   if (actions.write_files && Array.isArray(actions.write_files)) {
     for (const file of actions.write_files) {
       try {
@@ -981,6 +1034,11 @@ function executeActions(actions, origin) {
         fs.mkdirSync(path.dirname(filePath), { recursive: true });
         fs.writeFileSync(filePath, file.content, 'utf8');
         printSystem(`ファイル更新: ${file.path}${currentProject ? ` (project: ${currentProject})` : ''}`);
+        // 自己改善ファイルが更新されたら自動リロード
+        const basename = path.basename(filePath);
+        if (['SOUL.md', 'MEMORY.md', 'TASKS.md'].includes(basename) || filePath.includes('/skills/')) {
+          needsReload = true;
+        }
       } catch (e) {
         printSystem(`ファイル書き込みエラー: ${e.message}`);
       }
@@ -995,8 +1053,65 @@ function executeActions(actions, origin) {
         fs.mkdirSync(path.dirname(filePath), { recursive: true });
         fs.appendFileSync(filePath, file.content, 'utf8');
         printSystem(`ファイル追記: ${file.path}${currentProject ? ` (project: ${currentProject})` : ''}`);
+        const basename = path.basename(filePath);
+        if (['SOUL.md', 'MEMORY.md', 'TASKS.md'].includes(basename) || filePath.includes('/skills/')) {
+          needsReload = true;
+        }
       } catch (e) {
         printSystem(`ファイル追記エラー: ${e.message}`);
+      }
+    }
+  }
+
+  // 自己改善ファイルが更新された → 静かにコンテキスト再注入
+  if (needsReload) {
+    printSystem('自己改善検出: コンテキストを静かに再注入します');
+    queueEvent({ type: 'context_refresh' });
+  }
+
+  // Discord にファイル送信
+  if (actions.send_files && Array.isArray(actions.send_files)) {
+    const webhookUrl = process.env.DISCORD_WEBHOOK_MAIN;
+    if (!webhookUrl) {
+      printSystem('send_files: DISCORD_WEBHOOK_MAIN が未設定');
+      return;
+    }
+    for (const file of actions.send_files) {
+      try {
+        const filePath = expandHome(file.path);
+        if (!fs.existsSync(filePath)) {
+          printSystem(`send_files: ファイルが見つかりません: ${filePath}`);
+          continue;
+        }
+        const fileName = path.basename(filePath);
+        const fileData = fs.readFileSync(filePath);
+        const boundary = '----SentinelBoundary' + Date.now();
+        const caption = file.caption || '';
+
+        // multipart/form-data を手動構築
+        const parts = [];
+        // payload_json part
+        parts.push(`--${boundary}\r\nContent-Disposition: form-data; name="payload_json"\r\nContent-Type: application/json\r\n\r\n${JSON.stringify({ content: caption })}\r\n`);
+        // file part
+        parts.push(`--${boundary}\r\nContent-Disposition: form-data; name="file"; filename="${fileName}"\r\nContent-Type: application/octet-stream\r\n\r\n`);
+
+        const head = Buffer.from(parts[0] + parts[1], 'utf8');
+        const tail = Buffer.from(`\r\n--${boundary}--\r\n`, 'utf8');
+        const body = Buffer.concat([head, fileData, tail]);
+
+        fetch(webhookUrl, {
+          method: 'POST',
+          headers: { 'Content-Type': `multipart/form-data; boundary=${boundary}` },
+          body,
+        }).then(res => {
+          if (res.ok) {
+            printSystem(`ファイル送信完了: ${fileName}`);
+          } else {
+            res.text().then(t => printSystem(`ファイル送信エラー: ${res.status} ${t.slice(0, 200)}`));
+          }
+        }).catch(e => printSystem(`ファイル送信エラー: ${e.message}`));
+      } catch (e) {
+        printSystem(`send_files エラー: ${e.message}`);
       }
     }
   }
@@ -1024,89 +1139,118 @@ function resolveFilePath(filePath) {
 // サブエージェント管理
 // ============================================================
 function spawnSubAgent(id, prompt, origin) {
+  const spawnLogFile = path.join(AGENT_DIR, 'logs', 'spawn_debug.log');
+  const logSpawn = (msg) => {
+    try { fs.appendFileSync(spawnLogFile, `[${new Date().toISOString()}] [${id}] ${msg}\n`); } catch (e) {}
+  };
+
+  logSpawn(`spawnSubAgent開始: origin="${origin}" prompt_len=${prompt.length}`);
+
   if (jobs.has(id) && jobs.get(id).status === 'running') {
+    logSpawn(`❌ スキップ: 同一IDのジョブが既にrunning`);
     printSystem(`ジョブ "${id}" は既に実行中です`);
     return;
   }
 
+  if (jobs.has(id)) {
+    logSpawn(`既存ジョブ上書き: 旧status="${jobs.get(id).status}"`);
+  }
+
   jobs.set(id, { status: 'running', prompt, result: null, origin: origin || 'user' });
+  logSpawn(`jobs.set完了: status=running`);
   printSystem(`サブエージェント "${id}" を起動`);
 
-  // サブエージェントの出力をファイルに閉じ込める（ターミナルに漏らさない）
-  const jobDir = path.join(JOBS_DIR, id);
-  fs.mkdirSync(jobDir, { recursive: true });
-  const outFile = path.join(jobDir, 'output.log');
-  const errFile = path.join(jobDir, 'error.log');
-  const promptFile = path.join(jobDir, 'prompt.txt');
-  fs.writeFileSync(promptFile, prompt, 'utf8');
+  try {
+    // サブエージェントの出力をファイルに閉じ込める（ターミナルに漏らさない）
+    const jobDir = path.join(JOBS_DIR, id);
+    fs.mkdirSync(jobDir, { recursive: true });
+    const outFile = path.join(jobDir, 'output.log');
+    const errFile = path.join(jobDir, 'error.log');
+    const promptFile = path.join(jobDir, 'prompt.txt');
+    fs.writeFileSync(promptFile, prompt, 'utf8');
 
-  const { spawn } = require('child_process');
+    const { spawn } = require('child_process');
 
-  // プロンプトはファイルパスで渡す（引数長制限・特殊文字の問題を回避）
-  const promptFilePosix = promptFile.replace(/\\/g, '/');
-  const jobDirPosix = jobDir.replace(/\\/g, '/');
-  const scriptPath = path.join(SCRIPTS_DIR, 'run-sub.sh').replace(/\\/g, '/');
+    // プロンプトはファイルパスで渡す（引数長制限・特殊文字の問題を回避）
+    const promptFilePosix = promptFile.replace(/\\/g, '/');
+    const jobDirPosix = jobDir.replace(/\\/g, '/');
+    const scriptPath = path.join(SCRIPTS_DIR, 'run-sub.sh').replace(/\\/g, '/');
 
-  // Windows環境ではGit Bashのフルパスを指定
-  const bashCmd = process.platform === 'win32'
-    ? 'C:\\Program Files\\Git\\usr\\bin\\bash.exe'
-    : 'bash';
+    // Windows環境ではGit Bashのフルパスを指定
+    const bashCmd = process.platform === 'win32'
+      ? 'C:\\Program Files\\Git\\usr\\bin\\bash.exe'
+      : 'bash';
 
-  // ファイルディスクリプタの二重close防止フラグ
-  let fdsClosed = false;
-  const outFd = fs.openSync(outFile, 'w');
-  const errFd = fs.openSync(errFile, 'w');
+    // ファイルディスクリプタの二重close防止フラグ
+    let fdsClosed = false;
+    const outFd = fs.openSync(outFile, 'w');
+    const errFd = fs.openSync(errFile, 'w');
 
-  function closeFds() {
-    if (fdsClosed) return;
-    fdsClosed = true;
-    try { fs.closeSync(outFd); } catch (_) {}
-    try { fs.closeSync(errFd); } catch (_) {}
-  }
-
-  function handleResult(code, fromError) {
-    closeFds();
-
-    // error→close両方で呼ばれる場合があるので、処理済みならスキップ
-    if (jobs.get(id)?.status !== 'running') return;
-
-    let result;
-    try { result = fs.readFileSync(outFile, 'utf8'); } catch (e) { result = ''; }
-    let errOutput;
-    try { errOutput = fs.readFileSync(errFile, 'utf8'); } catch (e) { errOutput = ''; }
-
-    if (fromError || code !== 0) {
-      const errMsg = fromError || errOutput || result || `exit code: ${code}`;
-      jobs.set(id, { status: 'failed', prompt, result: errMsg, origin });
-      printSystem(`サブエージェント "${id}" 失敗`);
-      queueEvent({ type: 'job_failed', jobId: id, error: errMsg, origin });
-    } else {
-      jobs.set(id, { status: 'done', prompt, result, origin });
-      printSystem(`サブエージェント "${id}" 完了`);
-      queueEvent({ type: 'job_complete', jobId: id, result, origin });
+    function closeFds() {
+      if (fdsClosed) return;
+      fdsClosed = true;
+      try { fs.closeSync(outFd); } catch (_) {}
+      try { fs.closeSync(errFd); } catch (_) {}
     }
-  }
 
-  // Windows Git Bash環境ではUnixコマンド(mkdir,cat,date等)のPATHを明示的に設定
-  const spawnEnv = process.platform === 'win32'
-    ? {
-        ...process.env,
-        PATH: '/usr/bin:/bin:/mingw64/bin:' + (process.env.PATH || '')
+    function handleResult(code, fromError) {
+      closeFds();
+
+      // error→close両方で呼ばれる場合があるので、処理済みならスキップ
+      if (jobs.get(id)?.status !== 'running') return;
+
+      let result;
+      try { result = fs.readFileSync(outFile, 'utf8'); } catch (e) { result = ''; }
+      let errOutput;
+      try { errOutput = fs.readFileSync(errFile, 'utf8'); } catch (e) { errOutput = ''; }
+
+      if (fromError || code !== 0) {
+        const errMsg = fromError || errOutput || result || `exit code: ${code}`;
+        jobs.set(id, { status: 'failed', prompt, result: errMsg, origin });
+        printSystem(`サブエージェント "${id}" 失敗: ${String(errMsg).slice(0, 200)}`);
+        queueEvent({ type: 'job_failed', jobId: id, error: errMsg, origin });
+      } else {
+        jobs.set(id, { status: 'done', prompt, result, origin });
+        printSystem(`サブエージェント "${id}" 完了`);
+        queueEvent({ type: 'job_complete', jobId: id, result, origin });
       }
-    : process.env;
+    }
 
-  const proc = spawn(bashCmd, [
-    scriptPath,
-    '--file', promptFilePosix,
-    '--job-dir', jobDirPosix
-  ], {
-    stdio: ['ignore', outFd, errFd],
-    detached: false,
-    env: spawnEnv
-  });
+    // Windows Git Bash環境ではUnixコマンド(mkdir,cat,date等)のPATHを明示的に設定
+    const spawnEnv = process.platform === 'win32'
+      ? {
+          ...process.env,
+          PATH: '/c/Users/jtafu/.local/bin:/usr/bin:/bin:/mingw64/bin:' + (process.env.PATH || '')
+        }
+      : process.env;
 
-  proc.on('close', (code) => handleResult(code, null));
-  proc.on('error', (err) => handleResult(1, `プロセス起動エラー: ${err.message}`));
+    const proc = spawn(bashCmd, [
+      scriptPath,
+      '--file', promptFilePosix,
+      '--job-dir', jobDirPosix
+    ], {
+      stdio: ['ignore', outFd, errFd],
+      detached: false,
+      env: spawnEnv
+    });
+
+    logSpawn(`プロセスspawn完了: pid=${proc.pid || 'null'} script=${scriptPath}`);
+
+    proc.on('close', (code) => {
+      logSpawn(`プロセス終了: code=${code}`);
+      handleResult(code, null);
+    });
+    proc.on('error', (err) => {
+      logSpawn(`❌ プロセスエラー: ${err.message}`);
+      handleResult(1, `プロセス起動エラー: ${err.message}`);
+    });
+  } catch (err) {
+    // ファイル書き込みやプロセス起動の同期的エラーをキャッチ
+    const errMsg = `spawnSubAgent同期エラー: ${err.message}`;
+    jobs.set(id, { status: 'failed', prompt, result: errMsg, origin: origin || 'user' });
+    printSystem(`サブエージェント "${id}" 起動失敗: ${err.message}`);
+    queueEvent({ type: 'job_failed', jobId: id, error: errMsg, origin: origin || 'user' });
+  }
 }
 
 // ============================================================
@@ -1230,8 +1374,10 @@ async function processNextEvent() {
   }
 
   // コールバック実行（Discord等への応答返送）
+  let callbackUrl = null;  // 完了報告の送信先として保持
   if (pendingCallbacks.length > 0) {
     const cb = pendingCallbacks.shift();
+    callbackUrl = cb.url;
     try {
       const msg = response.message || '';
       // Discord Webhook: contentで送信（Embedより確実、2000文字制限）
@@ -1256,6 +1402,79 @@ async function processNextEvent() {
 
   // アクション実行
   executeActions(response.actions, event.type);
+
+  // 即時アクション完了報告（Discord経由のユーザーメッセージ起点で、spawnなし、ACTIONSあり）
+  const actions = response.actions || {};
+  const hasImmediateActions = actions.write_files || actions.append_files || actions.send_files;
+  const hasSpawn = actions.spawn && actions.spawn.length > 0;
+
+  // デバッグ: 完了報告の条件判定ログ
+  const debugTs = new Date().toISOString();
+  const debugConditions = {
+    eventType: event.type,
+    hasCallbackUrl: !!callbackUrl,
+    hasImmediateActions: !!hasImmediateActions,
+    hasSpawn: !!hasSpawn,
+    actionKeys: Object.keys(actions),
+    pendingEventsCount: pendingEvents.length,
+  };
+  try {
+    fs.appendFileSync(path.join(AGENT_DIR, 'logs', 'completion_report_debug.log'),
+      `[${debugTs}] conditions=${JSON.stringify(debugConditions)} → trigger=${event.type === 'user_message' && !!callbackUrl && !!hasImmediateActions && !hasSpawn}\n`);
+  } catch (e) {}
+
+  if (event.type === 'user_message' && callbackUrl && hasImmediateActions && !hasSpawn) {
+    // Brainに完了報告を求める
+    const completionEvent = {
+      type: 'system',
+      content: '直前のアクション（ファイル書き込み等）が完了した。ユーザーに完了報告を自然言語で簡潔に伝えよ（1〜3文）。何を作成・更新したか、結果はどうだったかを含めること。'
+    };
+    printSystem('📝 即時アクション完了 → Brainに完了報告を要求中...');
+
+    try {
+      fs.appendFileSync(path.join(AGENT_DIR, 'logs', 'completion_report_debug.log'),
+        `[${debugTs}] calling callBrain for completion report...\n`);
+    } catch (e) {}
+
+    startThinking();
+    const completionResponse = await callBrain(completionEvent);
+    stopThinking();
+
+    // デバッグ: Brain応答のログ
+    try {
+      fs.appendFileSync(path.join(AGENT_DIR, 'logs', 'completion_report_debug.log'),
+        `[${new Date().toISOString()}] completionResponse: message=${!!completionResponse.message} interrupted=${!!completionResponse.interrupted} retry=${!!completionResponse.retry} msg_preview="${(completionResponse.message || '').slice(0, 100)}"\n`);
+    } catch (e) {}
+
+    if (completionResponse.message && !completionResponse.interrupted && !completionResponse.retry) {
+      printSentinel(completionResponse.message);
+      appendHistory({ role: 'Sentinel', content: completionResponse.message });
+
+      // Discordに完了報告を送信
+      const msg = completionResponse.message;
+      const chunks = [];
+      for (let i = 0; i < msg.length; i += 1900) {
+        chunks.push(msg.substring(i, i + 1900));
+      }
+      for (const chunk of chunks) {
+        fetch(callbackUrl, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ content: chunk })
+        }).catch(e => console.error('[Completion Callback Error]', e.message));
+      }
+
+      try {
+        fs.appendFileSync(path.join(AGENT_DIR, 'logs', 'completion_report_debug.log'),
+          `[${new Date().toISOString()}] ✅ completion report sent to Discord\n`);
+      } catch (e) {}
+    } else {
+      try {
+        fs.appendFileSync(path.join(AGENT_DIR, 'logs', 'completion_report_debug.log'),
+          `[${new Date().toISOString()}] ❌ completion report NOT sent (conditions not met)\n`);
+      } catch (e) {}
+    }
+  }
 
   brainBusy = false;
   updateStatus();

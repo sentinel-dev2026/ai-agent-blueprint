@@ -19,8 +19,7 @@ import path from 'path';
 
 const execFileAsync = promisify(execFile);
 
-const HOME = process.env.HOME || process.env.USERPROFILE;
-const SENTINEL_DIR = process.env.SENTINEL_DIR || path.resolve(HOME, 'agent');
+const SENTINEL_DIR = process.env.SENTINEL_DIR || 'C:/Users/jtafu/agent';
 const ALLOWED_USER_IDS = process.env.ALLOWED_USER_IDS
   ? process.env.ALLOWED_USER_IDS.split(',')
   : []; // 空なら全員許可（プライベートサーバー前提）
@@ -78,6 +77,7 @@ const commands = {
         { name: '!post <テキスト>', value: '@sentinel_dev93でツイート', inline: true },
         { name: '!schedule', value: 'X投稿スケジュール表示', inline: true },
         { name: '!usage', value: 'トークン使用量を表示', inline: true },
+        { name: '!restart', value: 'Sentinelを再起動（次回heartbeatで実行）', inline: true },
       )
       .setFooter({ text: 'Sentinel v1.0' })
       .setTimestamp();
@@ -129,7 +129,7 @@ const commands = {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          message: `【Discordからのメッセージ】\n${args}`,
+          message: `【Discordからのメッセージ（${message.author.displayName || message.author.username}）】\n${args}`,
           callback_url: webhookUrl || undefined,
         }),
         signal: AbortSignal.timeout(5000),
@@ -246,6 +246,16 @@ const commands = {
       await message.reply(`❌ エラー: ${err.message.substring(0, 500)}`);
     }
   },
+
+  restart: async (message) => {
+    const flagPath = path.resolve(SENTINEL_DIR, '.restart-sentinel');
+    try {
+      writeFileSync(flagPath, `restart requested at ${new Date().toISOString()} by ${message.author.username}`);
+      await message.reply('🔄 再起動フラグを設定しました。次のheartbeat（最大30分以内）でsentinelが再起動されます。');
+    } catch (err) {
+      await message.reply(`❌ フラグ設定失敗: ${err.message}`);
+    }
+  },
 };
 
 /**
@@ -317,8 +327,19 @@ client.on('messageCreate', async (message) => {
   if (message.author.bot) return;
   if (!isAllowed(message.author.id)) return;
 
-  // メインチャンネルのみ反応
-  if (MAIN_CHANNEL_ID && message.channelId !== MAIN_CHANNEL_ID) return;
+  // エージェントルーティング: チャンネルIDから送信先を決定
+  const agentRoutes = {};
+  if (process.env.AGENT_ROUTES) {
+    for (const entry of process.env.AGENT_ROUTES.split('|')) {
+      const [channelId, rest] = entry.split('=');
+      const [apiUrl, webhookUrl] = rest.split(',');
+      agentRoutes[channelId.trim()] = { apiUrl: apiUrl.trim(), webhookUrl: webhookUrl.trim() };
+    }
+  }
+
+  // ルーティング対象チャンネルのみ反応
+  const route = agentRoutes[message.channelId];
+  if (Object.keys(agentRoutes).length > 0 && !route) return;
 
   // !コマンドの処理
   if (message.content.startsWith('!')) {
@@ -347,15 +368,15 @@ client.on('messageCreate', async (message) => {
   if (!text && savedFiles.length === 0) return;
 
   // メッセージ本文を組み立て
-  let msgBody = `【Discordからのメッセージ】\n${text}`;
+  let msgBody = `【Discordからのメッセージ（${message.author.displayName || message.author.username}）】\n${text}`;
   if (savedFiles.length > 0) {
     const fileInfo = savedFiles.map(f => `- ${f.name} → ${f.path}`).join('\n');
     msgBody += `\n\n【添付ファイル（ダウンロード済み）】\n${fileInfo}`;
     await message.reply(`📎 ${savedFiles.length}件のファイルを保存しました。`);
   }
 
-  const SENTINEL_API = process.env.SENTINEL_API_URL || 'http://localhost:3100';
-  const webhookUrl = process.env.DISCORD_WEBHOOK_URL;
+  const SENTINEL_API = route?.apiUrl || process.env.SENTINEL_API_URL || 'http://localhost:3100';
+  const webhookUrl = route?.webhookUrl || process.env.DISCORD_WEBHOOK_URL;
 
   // sentinel.jsが起動していなければ自動起動
   const running = await ensureSentinelRunning();
@@ -372,7 +393,7 @@ client.on('messageCreate', async (message) => {
         signal: AbortSignal.timeout(5000),
       });
       if (!res.ok) throw new Error(`API ${res.status}`);
-      if (savedFiles.length === 0) await message.reply('🤔 考え中...');
+      if (savedFiles.length === 0 && !text.startsWith('/')) await message.reply('🤔 考え中...');
     } catch (err) {
       await message.reply(`❌ sentinel.js送信エラー: ${err.message}`);
     }

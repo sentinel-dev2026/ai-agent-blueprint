@@ -1,7 +1,6 @@
 # 環境変数・認証情報
 .env
 .env.local
-.env.*.local
 .note-cookies.json
 tokens.json
 *.key
@@ -11,11 +10,12 @@ tokens.json
 .brain_session_id
 .tmp_prompt
 
-# ログ
-logs/
-*.log
+# ログ（機密性のあるもの）
+logs/brain_raw.log
+logs/token_usage*.jsonl
+logs/conversation_archive/
 
-# 会話履歴・個人情報
+# 会話履歴・個人情報を含むファイル
 conversation_history.jsonl
 conversation_summary.md
 MEMORY.md
@@ -24,12 +24,11 @@ TASKS.md
 # コンテンツ（記事ドラフト等）
 content/
 
-# ジョブ出力・inbox
+# ジョブ出力
 jobs/
-inbox/
 
-# 戦略・リサーチ（個人情報を含む可能性）
-strategy/
+# inbox
+inbox/
 
 # Node.js
 node_modules/
@@ -41,18 +40,3 @@ package-lock.json
 # OS
 .DS_Store
 Thumbs.db
-
-# Editor
-*.swp
-*.swo
-*~
-.vscode/
-.idea/
-
-# Temporary
-tmp/
-temp/
-*.tmp
-
-# Claude
-.claude/
